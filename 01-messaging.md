@@ -412,13 +412,19 @@ rotations as specified within [BOLT #8](https://github.com/lightningnetwork/ligh
 
 ## Acknowledgments
 
+## 謝辞
+
 TODO(roasbeef); fin
 
 
 ## References
+
+## 参考文献
 1. <a id="reference-2">http://www.unicode.org/charts/PDF/U2600.pdf</a>
 
 ## Authors
+
+## 著者
 
 FIXME
 
