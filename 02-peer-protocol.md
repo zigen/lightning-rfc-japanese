@@ -1,7 +1,11 @@
 # BOLT #2: Peer Protocol for Channel Management
 
+# BOLT #2: チャネル管理のためのピア間プロトコル
+
 The peer channel protocol has three phases: establishment, normal
 operation, and closing.
+
+ピア間チャネルプロトコルは、確立、通常取引、クローズの３つのフェイズで構成されます。
 
 # Table of Contents
   * [Channel](#channel)
@@ -24,10 +28,36 @@ operation, and closing.
       * [Updating Fees: `update_fee`](#updating-fees-update_fee)
     * [Message Retransmission](#message-retransmission)
   * [Authors](#authors)
+
+# 目次
+  * [チャネル](#channel)
+    * [チャネル確立](#channel-establishment)
+      * [ `open_channel` メッセージ](#the-open_channel-message)
+      * [ `accept_channel` メッセージ](#the-accept_channel-message)
+      * [ `funding_created` メッセージ](#the-funding_created-message)
+      * [ `funding_signed` メッセージ](#the-funding_signed-message)
+      * [ `funding_locked` メッセージ](#the-funding_locked-message)
+    * [チャネルクローズ](#channel-close)
+      * [クローズ開始: `shutdown` メッセージ](#closing-initiation-shutdown)
+      * [クローズ調整todo: `closing_signed` メッセージ](#closing-negotiation-closing_signed)
+    * [通常取引](#normal-operation)
+      * [HTLC送付](#forwarding-htlcs)
+      * [HTLCタイムアウトのリスク](#risks-with-htlc-timeouts)
+      * [HTLC追加: `update_add_htlc` メッセージ](#adding-an-htlc-update_add_htlc)
+      * [HTLC削除: `update_fulfill_htlc` メッセージ、 `update_fail_htlc` メッセージ、 `update_fail_malformed_htlc` メッセージ](#removing-an-htlc-update_fulfill_htlc-update_fail_htlc-and-update_fail_malformed_htlc)
+      * [今までの更新内容のコミット: `commitment_signed` メッセージ](#committing-updates-so-far-commitment_signed)
+      * [更新された状態へ遷移完了: `revoke_and_ack` メッセージ](#completing-the-transition-to-the-updated-state-revoke_and_ack)
+      * [手数料の更新: `update_fee` メッセージ](#updating-fees-update_fee)
+    * [メッセージの再送付](#message-retransmission)
+  * [著者](#authors)
   
 # Channel
 
+# チャネル
+
 ## Channel Establishment
+
+## チャネルの確立
 
 
 Channel establishment begins immediately after authentication, and
@@ -44,6 +74,12 @@ funding outpoint, she is able to generate the initiator's commitment
 for the commitment transaction, and send it over using the
 `funding_signed` message.
 
+チャネルの確立は認証のあとすぐに始まります。
+チャネルの確立は `open_channel` メッセージを送るファンディングノードと、それに対して `accept_channel` メッセージを返答するノードで構成されます。
+チャネルパラメータを決めた上で、ファンディングノードはファンディングトランザクションとコミットメントトランザクションの両ノードのバージョンを作ることができます。このバージョンは、[BOLT 03](https://github.com/lightningnetwork/lightning-rfc/blob/master/03-transactions.md#bolt-3-bitcoin-transaction-and-script-formats) に記述されているものです。
+ファンディングノードはその後、`funding_created` メッセージを使ってファンディングトランザクションアウトプットのアウトポイントを送ります。この際、返答ノードのコミットメントトランザクションバージョンに合った署名も送られます。
+一度返答ノードがファンディングアウトポイントを受け取るとコミットメントトランザクションに対する初期コミットメントを生成できるようになり、 `funding_signed` メッセージを使ってこれをファンディングノードに返送します。
+
 Once the channel funder receives the `funding_signed` message, they
 must broadcast the funding transaction to the Bitcoin network. After
 the `funding_signed` message is sent/received, both sides should wait
@@ -53,6 +89,10 @@ the `funding_locked` message, the channel is established and can begin
 normal operation. The `funding_locked` message includes information
 which will be used to construct channel authentication proofs.
 
+一度チャネルファンディングノードが `funding_signed` メッセージを受け取ると、彼らはファンディングトランザクションをBitcoinネットワークにブロードキャストしなければいけません。
+`funding_signed` メッセージを送受したあと、両サイドのノードは、ファンディングトランザクションがブロックチェーンに入り指定された深さ(承認数)に達するまで待つべきです。
+`funding_locked` メッセージが両サイドに送られると、チャネルは確立され通常取引を始めることができるようになります。
+`funding_locked` メッセージにはチャネル認証証明を作るために必要な情報が含まれています。
 
         +-------+                              +-------+
         |       |--(1)---  open_channel  ----->|       |
