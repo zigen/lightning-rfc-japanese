@@ -76,8 +76,10 @@ for the commitment transaction, and send it over using the
 
 チャネルの確立は認証のあとすぐに始まります。
 チャネルの確立は `open_channel` メッセージを送るファンディングノードと、それに対して `accept_channel` メッセージを返答するノードで構成されます。
-チャネルパラメータを決めた上で、ファンディングノードはファンディングトランザクションとコミットメントトランザクションの両ノードのバージョンを作ることができます。このバージョンは、[BOLT 03](https://github.com/lightningnetwork/lightning-rfc/blob/master/03-transactions.md#bolt-3-bitcoin-transaction-and-script-formats) に記述されているものです。
-ファンディングノードはその後、`funding_created` メッセージを使ってファンディングトランザクションアウトプットのアウトポイントを送ります。この際、返答ノードのコミットメントトランザクションバージョンに合った署名も送られます。
+チャネルパラメータを決めた上で、ファンディングノードはファンディングトランザクションとコミットメントトランザクションの両ノードのバージョンを作ることができます。
+このバージョンは、[BOLT 03](https://github.com/lightningnetwork/lightning-rfc/blob/master/03-transactions.md#bolt-3-bitcoin-transaction-and-script-formats) に記述されているものです。
+ファンディングノードはその後、`funding_created` メッセージを使ってファンディングトランザクションアウトプットのアウトポイントを送ります。
+この際、返答ノードのコミットメントトランザクションバージョンに合った署名も送られます。
 一度返答ノードがファンディングアウトポイントを受け取るとコミットメントトランザクションに対する初期コミットメントを生成できるようになり、 `funding_signed` メッセージを使ってこれをファンディングノードに返送します。
 
 Once the channel funder receives the `funding_signed` message, they
@@ -110,16 +112,24 @@ If this fails at any stage, or a node decides that the channel terms
 offered by the other node are not suitable, the channel establishment
 fails.
 
+もしどこか段階で失敗する、または相手ノードから提供されるチャネル期間をノードが適切なものでないと判断した場合は、チャネル確立が異常終了します。
+
 Note that multiple channels can operate in parallel, as all channel
 messages are identified by either a `temporary_channel_id` (before the
 funding transaction is created) or `channel_id` derived from the
 funding transaction.
 
+ここで、２つのノード間で複数のチャネルを平行で動作させることができる点を強調しておきます。
+というのは、全てのチャネルメッセージは `temporary-channel-id` メッセージ(ファンディングトランザクションが作られる前であれば)またはファンディングトランザクションから作られる `channel-id` メッセージによって一意に指定され、２つのノードidとは切り話されているためです。
+
 ### The `open_channel` message
 
+### `open_channel`メッセージ
 
 This message contains information about a node, and indicates its
 desire to set up a new channel.
+
+このメッセージはノードに関する情報を含んでおり、新しくチャネルの開設要望を示しています。
 
 1. type: 32 (`open_channel`)
 2. data:
@@ -147,23 +157,58 @@ The existence of the `chain_hash` allows nodes to open channel
 across many distinct blockchains as well as have channels within multiple
 blockchains opened to the same peer (if they support the target chains).
 
+chain-hashの値はオープンしたチャネルがあるブロックチェーンを示しています。
+これは通常それぞれのブロックチェーンのジェネシスブロックのハッシュ値になります。
+chain-hashがあることで、ノードは複数のブロックチェーンにチャネルを持てるだけでなく、多くの別々のブロックチェーンをまたがるようなチャネルを開くこともできるようになります(todo)。
+
 The `temporary_channel_id` is used to identify this channel until the funding transaction is established. `funding_satoshis` is the amount the sender is putting into the channel.  `dust_limit_satoshis` is the threshold below which output should be generated for this node's commitment or HTLC transaction; ie. HTLCs below this amount plus HTLC transaction fees are not enforceable on-chain.  This reflects the reality that tiny outputs are not considered standard transactions and will not propagate through the Bitcoin network.
+
+`temporary-channel-id` フィールドは、ファンディングトランザクションが確立するまでの間にチャネルを指定するidとして使われ
+ます。
+`funding-satoshis` フィールドはファンディングノードが最初にチャネルに置いた金額です。
+`dust-limit-satoshis` フィールドは、このノードのコミットメントまたはHTLCトランザクションに対して生成されるアウトプットが持つ金額下限値で、例えば、この金額とHTLCトランザクション手数料の和よりも小さいHTLCはオンチェーンに入ることができません。
+これは、極小金額を持つアウトプットが標準トランザクションとはみなされず、Bitcoinネットワークを伝搬できないということに対応しています。
 
 `max_htlc_value_in_flight_msat` is a cap on total value of outstanding HTLCs, which allows a node to limit its exposure to HTLCs; similarly `max_accepted_htlcs` limits the number of outstanding HTLCs the other node can offer. `channel_reserve_satoshis` is the minimum amount that the other node is to keep as a direct payment. `htlc_minimum_msat` indicates the smallest value HTLC this node will accept.
 
+`max-htlc-value-in-flight-msat` フィールドは未払いHTLCの総和に対する上限値です。
+これは未払いHTLCに拠出できる金額を制限できるようにしています。
+同様に `max-accepted-htlcs` フィールドは相手のノードが要求できる未払いHTLCの上限数になっています。
+`channel-reserve-satoshis`フィールドは相手のノードが自身に必ずキープしておかなければいけない最小金額です。
+`htlc-minimum-msat` フィールドはこのノードが受け取れる最も小さいHTLC金額を示しています。
+
 `feerate_per_kw` indicates the initial fee rate by 1000-weight (ie. 1/4 the more normally-used 'feerate per kilobyte') which this side will pay for commitment and HTLC transactions as described in [BOLT #3](03-transactions.md#fee-calculation) (this can be adjusted later with an `update_fee` message).  `to_self_delay` is the number of blocks that the other nodes to-self outputs must be delayed, using `OP_CHECKSEQUENCEVERIFY` delays; this is how long it will have to wait in case of breakdown before redeeming its own funds.
 
+`feerate-per-kw` フィールドは、1000ウェイトごと(つまり、通常使われる'キロバイト単位の手数料率'の1/4)の初期手数料率を示しています。
+この初期手数料は、 [BOLT #3](03-transactions.md#fee-calculation) で書かれているようなコミットメントトランザクションやHTLCトランザクションに対して支払われる手数料です(のちほど `update_fee` メッセージによって微調整できます)。
+`to-self-delay` フィールドは `OP_CHECKSEQUENCEVERIFY` を使って行われる相手ノード自身へのアウトプットをどれくらい遅延させておかないといけないかを指定するブロック数です。
+これは、相手ノードがチャネルをbreakdownした際に、相手ノードの自分の資産を得るのにどれくらいの時間待たなければいけないかを与えています。
+
 The `funding_pubkey` is the public key in the 2-of-2 multisig script of the funding transaction output.  The `revocation_basepoint` is combined with the revocation preimage for this commitment transaction to generate a unique revocation key for this commitment transaction. The `payment_basepoint` and `delayed_payment_basepoint` are similarly used to generate a series of keys for any payments to this node: `delayed_payment_basepoint` is used to for payments encumbered by a delay.  Varying these keys ensures that the transaction ID of each commitment transaction is unpredictable by an external observer, even if one commitment transaction is seen: this property is very useful for preserving privacy when outsourcing penalty transactions to third parties.
+
+`funding-pubkey` フィールドは、ファンディングトランザクションアウトプットの2-of-2マルチシグscriptにある公開鍵です。
+`revocation-basepoint` フィールドは、取り消しpreimageと紐づくもので、このコミットメントトランザクションがこのコミットメ
+ントトランザクションに対する一意な取り消し鍵を生成する基準になるものです。
+`payment-basepoint` フィールドと `delayed-payment-basepoint` フィールドは、同様にこのノードへの支払いに使う鍵の列を生成
+するために使います。
+`delayed-payment-basepoint` フィールドは、遅延によって妨げられる支払いに対して使われます(todo)。
+これらの鍵を変えることで、たとえ１個のコミットメントトランザクションがわかってもそれぞれのコミットメントトランザクションのtxidは外部から予測できなくなります。
+これにより、第三者にペナルティートランザクションをアウトソースするときでもプライバシーを守ることができます。
 
 FIXME: Describe Dangerous feature bit for larger channel amounts.
 
 
 #### Requirements
 
+#### 要件
+
 A sending node MUST ensure that the `chain_hash` value identifies the chain they
 they wish to open the channel within. For the Bitcoin blockchain, the
 `chain_hash` value MUST be (encoded in hex):
 `000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f`.
+
+open_channelメッセージを送付するノードは、chain-hashの値が開くチャネルのブロックチェーンを一意に指定していることを保障しなければいけません。
+Bitcoinブロックチェーンに対してであれば、chain-hashの値は(16進数で) `000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f` です。
 
 A sending node MUST ensure `temporary_channel_id` is unique from any other
 channel id with the same peer.  The sender MUST set `funding_satoshis`
@@ -176,17 +221,29 @@ compressed secp256k1 pubkeys. The sender SHOULD set `feerate_per_kw`
 to at least the rate it estimates would cause the transaction to be
 immediately included in a block.
 
+メッセージ送付ノードは、 `temporary-channel-id` フィールドが同じピア内で他で使われているチャネルidとは別の一意の値になっていることを保障しなければいけません。
+メッセージ送付ノードは、 `funding-satoshis` フィールドを2^24satoshiよりも小さい値にしなければいけません。
+メッセージ送付ノードは、 `push-msat` フィールドを `funding-satoshis` フィールド * 1000より小さいまたは等しい値にしなければいけません。
+メッセージ送付ノードは、メッセージ受信ノードによる不正行為が置きた場合に送付ノードがコミットメントトランザクションを使用できるように十分な値を `to-self-delay` フィールドを設定するべきです。
+`funding-pubkey` フィールド、 `revocation-basepoint` フィールド、 `payment-basepoint` フィールド、 `delayed-payment-basepoint` フィールドは、DER形式の有効な圧縮secp256k1公開鍵でなければいけません。
+メッセージ送付ノードは、トランザクションがすぐにブロックに取り込まれると見積もれるような最小の値を `feerate-per-kw` フィールドに設定するべきです。
 
 The sender SHOULD set `dust_limit_satoshis` to a sufficient value to
 allow commitment transactions to propagate through the Bitcoin
 network.  It SHOULD set `htlc_minimum_msat` to the minimum
 amount HTLC it is willing to accept from this peer.
 
+メッセージ送付ノードは `dust-limit-satoshis` フィールドをコミットメントトランザクションがBitcoinネットワークを伝搬できるような十分な値にするべきです。
+`htlc-minimum-msat` フィールドには相手ピアが受け入れてくれるようなHTLCに対する最低金額を設定すべきです。
+
 The receiving node MUST accept a new `open_channel` message if the
 connection has been re-established after receiving a previous
 `open_channel` and before receiving a `funding_created` message.  In
 this case, the receiving node MUST discard the previous `open_channel`
 message.
+
+もし前の `open-channel` メッセージを受け取ったのち `funding-created` メッセージではなく新しい `open-channel` メッセージを受け取った場合は、受信ノードは新しい `open-channel` メッセージを受け入れなければいけません。
+この場合、受信ノードは前の `open-channel` メッセージを破棄しなければいけません。
 
 The receiving node MUST fail the channel if `to_self_delay` is
 unreasonably large.  The receiver MAY fail the channel if
@@ -195,17 +252,28 @@ unreasonably large.  The receiver MAY fail the channel if
 The receiving node MAY fail the channel if it considers
 `htlc_minimum_msat` too large, `max_htlc_value_in_flight_msat` too small, `channel_reserve_satoshis` too large, or `max_accepted_htlcs` too small.  It MUST fail the channel if `max_accepted_htlcs` is greater than 483.
 
+受信ノードは、もし `to-self-delay` フィールドの値が極端に大きくなっていた場合、チャネルを異常終了しなければいけません。
+受信ノードは、もし `funding-satoshis` フィールドの値が小さすぎている場合、チャネルを異常終了するかもしれません。
+受信ノードは、もし `push-msat` フィールドの値が `funding-amount` * 1000よりも大きくなっている場合、チャネルを異常終了しなければいけません。
+受信ノードは、もし `htlc-minimum-msat` フィールド、 `channel-reserve-satoshis` フィールドの値が大きすぎる、または `max-htlc-value-in-flight` フィールド、 `max-accepted-htlcs` フィールドの値が小さすぎる場合はチャネルを異常終了しなければいけません。
+受信ノードは、もし `max-accepted-htlcs` フィールドの値が483より大きい場合、チャネルを異常終了しなければいけません。
+
 The receiver MUST fail the channel if it
 considers `feerate_per_kw` too small for timely processing, or unreasonably large.  The
 receiver MUST fail the channel if `funding_pubkey`, `revocation_basepoint`, `payment_basepoint` or `delayed_payment_basepoint`
 are not valid DER-encoded compressed secp256k1 pubkeys.
 
+受信ノードは、もし `feerate-per-kw` フィールドの値が迅速な処理に対して小さすぎる、または極端に大きすぎる場合、チャネルを異常終了しなければいけません。
+受信ノードは、もし `funding-pubkey` フィールド、 `revocation-basepoint` フィールド、 `payment-basepoint` フィールド、 `delayed-payment-basepoint` フィールドの値が、DER形式の有効な圧縮secp256k1公開鍵でない場合、チャネルを異常終了しなければいけません。
 
 The receiver MUST NOT consider funds received using `push_msat` to be received until the funding transaction has reached sufficient depth.
 
+受信ノードは、ファンディングトランザクションの承認数が十分な数になるまで `push-msat` を使って受け取った資金を受け取り済
+みとして考えてはいけません。
 
 #### Rationale
 
+#### 合理性
 
 The *channel reserve* is specified by the peer's `channel_reserve_satoshis`; 1% of the channel total is suggested.  Each side of a channel maintains this reserve so it always has something to lose if it were to try to broadcast an old, revoked commitment transaction.  Initially this reserve may not be met, as only one side has funds, but the protocol ensures that progress is always toward it being met, and once met it is maintained.
 
