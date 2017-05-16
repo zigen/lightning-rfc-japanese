@@ -392,7 +392,13 @@ This message gives the funder the signature they need for the first
 commitment transaction, so they can broadcast it knowing they can
 redeem their funds if they need to.
 
+このメッセージは、ファンディングノードに最初のコミットメントトランザクションに必要な署名を与えます。
+この署名があるので、必要なときにファンディングノードが資金を取り戻せるようなトランザクションをブロードキャストできます。
+
 This message introduces the `channel_id` to identify the channel, which is derived from the funding transaction by combining the `funding_txid` and the `funding_output_index` using big-endian exclusive-OR (ie. `funding_output_index` alters the last two bytes).
+
+このメッセージにはチャネルを指定する `channel-id` を入れています。
+このidは、ビッグエンディアンによる排他的OR(つまり `funding-output-index` は最後の２バイトだけになります)を使って `funding-txid` と `funding-output-index` を加え合わせることで作られたファンディングトランザクションから導かれるものです。todo
 
 1. type: 35 (`funding_signed`)
 2. data:
@@ -400,6 +406,8 @@ This message introduces the `channel_id` to identify the channel, which is deriv
     * [`64`:`signature`]
 
 #### Requirements
+
+#### 要件
 
 The sender MUST set `channel_id` by exclusive-OR of the `funding_txid` and the `funding_output_index` from the `funding_created` message, and MUST set `signature` to the valid signature using its `funding_pubkey` for the initial commitment transaction as defined in [BOLT #3](03-transactions.md#commitment-transaction).
 
@@ -409,7 +417,12 @@ The recipient SHOULD broadcast the funding transaction on receipt of a valid `fu
 
 ### The `funding_locked` message
 
+### `funding_locked` メッセージ
+
 This message indicates that the funding transaction has reached the `minimum_depth` asked for in `accept_channel`.  Once both nodes have sent this, the channel enters normal operating mode.
+
+このメッセージは、ファンディングトランザクションが `accept_channel` メッセージの中で通知された `minimum-depth` フィールドの値分だけの承認数が確保されたことを示しています。
+一度両方のノードがこれを送ると、チャネルは通常取引モードに移行します。
 
 1. type: 36 (`funding_locked`)
 2. data:
@@ -417,6 +430,8 @@ This message indicates that the funding transaction has reached the `minimum_dep
     * [`33`:`next_per_commitment_point`]
 
 #### Requirements
+
+#### 要件
 
 The sender MUST wait until the funding transaction has reached
 `minimum_depth` before sending this message.
@@ -442,19 +457,31 @@ appearing, there is a denial of service risk.
 
 #### Future
 
+#### 将来
+
 We could add an SPV proof, and route block hashes in separate
 messages.
 
+のちほどSPV proofやroute block hashを別のメッセージに追加するかもしれません。
+
 ## Channel Close
+
+## チャネルクローズ
 
 Nodes can negotiate a mutual close for the connection, which unlike a
 unilateral close, allows them to access their funds immediately and
 can be negotiated with lower fees.
 
+ノードはコネクションの相互クローズを試みることができます。
+これはunilateral close(一方的なクローズ)とは違うもので、両端ノードは直ちにそれぞれの資金にアクセスできるようになり、より低い手数料で行うことができます。
+
 Closing happens in two stages: the first is by one side indicating
 that it wants to clear the channel (and thus will accept no new
 HTLCs), and once all HTLCs are resolved, the final channel close
 negotiation begins.
+
+クロージングは２つのステージを経ます。
+最初は、片方のノードがチャネルを清算(つまり、もう新しいHTLCを受け付けない)し、一度全てのHTLCを解決するとチャネルクローズの最終調整が始まります。
 
         +-------+                              +-------+
         |       |--(1)-----  shutdown  ------->|       |
@@ -473,8 +500,13 @@ negotiation begins.
 
 ### Closing initiation: `shutdown`
 
+### クロージング開始: `shutdown`
+
 Either node (or both) can send a `shutdown` message to initiate closing,
 and indicating the scriptpubkey it wants to be paid to.
+
+片方のノード(または両方)がクロージングを開始するために `shutdown` メッセージを送ります。
+これにはscriptpubkeyが含まれます。
 
 
 1. type: 38 (`shutdown`)
@@ -484,6 +516,8 @@ and indicating the scriptpubkey it wants to be paid to.
    * [`len`:`scriptpubkey`]
 
 #### Requirements
+
+#### 要件
 
 A node MUST NOT send a `shutdown` if there are updates pending
 on the receiving node's commitment transaction.
@@ -506,18 +540,30 @@ A receiving node MUST reply to a `shutdown` message with a `shutdown` once there
 
 #### Rationale
 
+#### 合理性
+
 If channel state is always "clean" (no pending changes) when a
 shutdown starts, we avoid the question of how to behave if it wasn't;
 the sender always send an `commitment_signed` first.
 
+もしシャットダウンを開始した時点でチャネルの状態が"きれい"(ペンディング状態の更新がない)であれば、きれいではない場合にどのようにするのかという点を避けることができます。
+ファンディングノードは常に `commitment_signed` メッセージを最初に送るようにします。todo
+
 As shutdown implies a desire to terminate, it implies that no new
 HTLCs will be added or accepted.
+
+シャットダウンはチャネルの停止要求を意味しているため、もう新しいHTLCは追加も了承もされません。
 
 The `scriptpubkey` forms include only standard forms accepted by the
 Bitcoin network, ensuring that the resulting transaction will
 propagate to miners.
 
+`scriptpubkey` はBitcoinネットワークに受け入れられる標準的な形式のみを含むようにしておき、生成されるトランザクションが確実にマイナーに伝搬するようにしておきます。
+
 The `shutdown` response requirement implies that the node sends `commitment_signed` to commit any outstanding changes before replying, but it could theoretically reconnect instead, which simply erases all outstanding uncommitted changes.
+
+`shutdown` メッセージに返答するということは、未払いの変更を引き受けるためにこのノードが `commitment_signed` メッセージを返答前に送っているというです。
+todo
 
 ### Closing negotiation: `closing_signed`
 
