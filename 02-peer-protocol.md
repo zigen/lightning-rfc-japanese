@@ -277,12 +277,28 @@ The receiver MUST NOT consider funds received using `push_msat` to be received u
 
 The *channel reserve* is specified by the peer's `channel_reserve_satoshis`; 1% of the channel total is suggested.  Each side of a channel maintains this reserve so it always has something to lose if it were to try to broadcast an old, revoked commitment transaction.  Initially this reserve may not be met, as only one side has funds, but the protocol ensures that progress is always toward it being met, and once met it is maintained.
 
+*channel reserve(チャネル予備金)* はピアの `channel-reserve-satoshis` フィールドの値によって指定されています。例としては、チャネルに置いてある総金額の1%です。
+相手が古いトランザクションをブロードキャストしようとした場合に常に何かを失うように、チャネルのそれぞれの側がこのreserveを保ちます。
+最初に、このreserveは満たされていないかもしれません。
+というのは、片方の側だけが資金を持っているからです。
+しかし、プロトコルはreserveを保つような方向で動き、一度満たされればそれを保つようにします。
 
 The sender can unconditionally give initial funds to the receiver using a non-zero `push_msat`, and this is one case where the normal reserve mechanism doesn't apply.  However, like any other on-chain transaction, this payment is not certain until the funding transaction has been confirmed sufficiently (may be double-spent) and may require a separate method to prove payment via on-chain confirmation.
 
+メッセージ送信ノードは、無条件に最低でも `push-msat` の値の初期資金を受信ノードに送ります。
+これは、通常のreserverメカニズムが適用されていない１つの場合です。
+しかし、他のオンチェーントランザクションのように、この支払いはファンディングトランザクションが十分な数だけ承認されてからでなければ確かなものにはなりません(二重支払いの可能性があるため)。
+そして、支払いがオンチェーンでの承認を受けたものかどうかを確認するためには他の方法が必要である可能性があります。
+
 The `feerate_per_kw` is generally only a concern to the sender (who pays the fees), but that is also the feerate paid by HTLC transactions; thus unreasonably large fee rates can also penalize the recipient.
 
+`feerate-per-kw` フィールドは、一般にメッセージ送信ノード側のみが気にすることです(つまり、誰が手数料を払うのか)。
+しかし、このフィールドの値はまたHTLCによって支払われる手数料率でもあります。
+このため、高すぎる手数料率は受金者を不利な立場に置くことになります。
+
 #### Future
+
+#### 将来
 
 
 It would be easy to have a local feature bit which indicated that a
@@ -292,9 +308,13 @@ protocol.
 
 ### The `accept_channel` message
 
+### `accept_channel` メッセージ
+
 
 This message contains information about a node, and indicates its
 acceptance of the new channel.
+
+このメッセージはノードについての情報を持ち、新しいチャネルの了承を示します。
 
 
 1. type: 33 (`accept_channel`)
@@ -315,6 +335,7 @@ acceptance of the new channel.
 
 #### Requirements
 
+#### 要件
 
 The receiving MUST reject the channel if the `chain_hash` value within the
 `open_channel` message is set to a hash of a chain unknown to the receiver.
@@ -327,9 +348,14 @@ Other fields have the same requirements as their counterparts in `open_channel`.
 
 ### The `funding_created` message
 
+### `funding_created` メッセージ
+
 This message describes the outpoint which the funder has created for
 the initial commitment transactions.  After receiving the peer's
 signature, it will broadcast the funding transaction.
+
+このメッセージは、ファンディングノードが初期コミットメントトランザクションのために作るアウトポイントを示しています。
+ピアが署名を受け取ったのちにこのファンディングトランザクションがブロードキャストされます。
 
 1. type: 34 (`funding_created`)
 2. data:
@@ -340,15 +366,25 @@ signature, it will broadcast the funding transaction.
 
 #### Requirements
 
+#### 要件
+
 The sender MUST set `temporary_channel_id` the same as the `temporary_channel_id` in the `open_channel` message.  The sender MUST set `funding_txid` to the transaction ID of a non-malleable transaction, which it MUST NOT broadcast, and MUST set `funding_output_index` to the output number of that transaction which corresponds the funding transaction output as defined in [BOLT #3](03-transactions.md#funding-transaction-output), and MUST set `signature` to the valid signature using its `funding_pubkey` for the initial commitment transaction as defined in [BOLT #3](03-transactions.md#commitment-transaction).  The sender SHOULD use only BIP141 (Segregated Witness) inputs when creating the funding transaction.
 
 The recipient MUST fail the channel if `signature` is incorrect.
 
 #### Rationale
 
+#### 合理性
+
 The `funding_output_index` can only be 2 bytes, since that's how we'll pack it into the `channel_id` used throughout the gossip protocol.  The limit of 65535 outputs should not be overly burdensome.
 
+`funding-output-index` フィールドは２バイト長です。
+というのは、このフィールドの値はゴシッププロトコルを通して使われるchannel-idに詰め込まれるものであるためです。
+65535個のアウトプット制限は過度な制限というわけではないです。
+
 A transaction with all Segregated Witness inputs is not malleable, hence the recommendation for the funding transaction.
+
+インプット全てがSegregated Witnessインプットになっているトランザクションには展性はないため、ファンディングトランザクションに推奨されています。
 
 ### The `funding_signed` message
 
