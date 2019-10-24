@@ -19,8 +19,8 @@ of a node.
     * [Handshake State Initialization](#handshake-state-initialization)
     * [Handshake Exchange](#handshake-exchange)
   * [Lightning Message Specification](#lightning-message-specification)
-    * [Encrypting and Sending Messages](#encrypting-messages)
-    * [Receiving and Decrypting Messages](#decrypting-messages)
+    * [Encrypting and Sending Messages](#encrypting-and-sending-messages)
+    * [Receiving and Decrypting Messages](#receiving-and-decrypting-messages)
   * [Lightning Message Key Rotation](#lightning-message-key-rotation)
   * [Security Considerations](#security-considerations)
   * [Appendix A: Transport Test Vectors](#appendix-a-transport-test-vectors)
@@ -66,7 +66,8 @@ an AEAD payload with a zero-length cipher text is sent. As this payload has no
 length, only a MAC is sent across. The mixing of ECDH outputs into
 a hash digest forms an incremental TripleDH handshake.
 
-Using the language of the Noise Protocol, `e` and `s` (both public keys)
+Using the language of the Noise Protocol, `e` and `s` (both public keys with `e` being 
+the ephemeral key and `s` being the static key which in our case is usually the `nodeid`)
 indicate possibly encrypted keying material, and `es`, `ee`, and `se` each indicate an
 ECDH operation between two keys. The handshake is laid out as follows:
 ```
@@ -147,12 +148,12 @@ Throughout the handshake process, each side maintains these variables:
  * `e`: a party's **ephemeral keypair**. For each session, a node MUST generate a
    new ephemeral key with strong cryptographic randomness.
 
- * `s`: a party's **static public key** (`ls` for local, `rs` for remote)
+ * `s`: a party's **static keypair** (`ls` for local, `rs` for remote)
 
 The following functions will also be referenced:
 
-  * `ECDH(rk, k)`: performs an Elliptic-Curve Diffie-Hellman operation using
-    `rk`, which is a `secp256k1` public key, and `k`, which is a valid private key
+  * `ECDH(k, rk)`: performs an Elliptic-Curve Diffie-Hellman operation using
+    `k`, which is a valid private key, and `rk`, which is a `secp256k1` public key
     within the finite field, as defined by the curve parameters
       * The returned value is the SHA256 of the DER-compressed format of the
 	    generated point.
@@ -231,10 +232,10 @@ and 16 bytes for the `poly1305` tag.
 2. `h = SHA-256(h || e.pub.serializeCompressed())`
      * The newly generated ephemeral key is accumulated into the running
        handshake digest.
-3. `ss = ECDH(rs, e.priv)`
+3. `es = ECDH(e.priv, rs)`
      * The initiator performs an ECDH between its newly generated ephemeral
        key and the remote node's static public key.
-4. `ck, temp_k1 = HKDF(ck, ss)`
+4. `ck, temp_k1 = HKDF(ck, es)`
      * A new temporary encryption key is generated, which is
        used to generate the authenticating MAC.
 5. `c = encryptWithAD(temp_k1, 0, h, zero)`
@@ -250,7 +251,7 @@ and 16 bytes for the `poly1305` tag.
 2. Parse the read message (`m`) into `v`, `re`, and `c`:
     * where `v` is the _first_ byte of `m`, `re` is the next 33
       bytes of `m`, and `c` is the last 16 bytes of `m`
-    * The raw bytes of the remote party's ephemeral public key (`e`) are to be
+    * The raw bytes of the remote party's ephemeral public key (`re`) are to be
       deserialized into a point on the curve using affine coordinates as encoded
       by the key's serialized composed format.
 3. If `v` is an unrecognized handshake version, then the responder MUST
@@ -258,10 +259,10 @@ and 16 bytes for the `poly1305` tag.
 4. `h = SHA-256(h || re.serializeCompressed())`
     * The responder accumulates the initiator's ephemeral key into the authenticating
       handshake digest.
-5. `ss = ECDH(re, s.priv)`
+5. `es = ECDH(s.priv, re)`
     * The responder performs an ECDH between its static private key and the
       initiator's ephemeral public key.
-6. `ck, temp_k1 = HKDF(ck, ss)`
+6. `ck, temp_k1 = HKDF(ck, es)`
     * A new temporary encryption key is generated, which will
       shortly be used to check the authenticating MAC.
 7. `p = decryptWithAD(temp_k1, 0, h, c)`
@@ -293,10 +294,10 @@ for the `poly1305` tag.
 2. `h = SHA-256(h || e.pub.serializeCompressed())`
      * The newly generated ephemeral key is accumulated into the running
        handshake digest.
-3. `ss = ECDH(re, e.priv)`
+3. `ee = ECDH(e.priv, re)`
      * where `re` is the ephemeral key of the initiator, which was received
        during Act One
-4. `ck, temp_k2 = HKDF(ck, ss)`
+4. `ck, temp_k2 = HKDF(ck, ee)`
      * A new temporary encryption key is generated, which is
        used to generate the authenticating MAC.
 5. `c = encryptWithAD(temp_k2, 0, h, zero)`
@@ -315,12 +316,12 @@ for the `poly1305` tag.
 3. If `v` is an unrecognized handshake version, then the responder MUST
     abort the connection attempt.
 4. `h = SHA-256(h || re.serializeCompressed())`
-5. `ss = ECDH(re, e.priv)`
+5. `ee = ECDH(e.priv, re)`
     * where `re` is the responder's ephemeral public key
     * The raw bytes of the remote party's ephemeral public key (`re`) are to be
       deserialized into a point on the curve using affine coordinates as encoded
       by the key's serialized composed format.
-6. `ck, temp_k2 = HKDF(ck, ss)`
+6. `ck, temp_k2 = HKDF(ck, ee)`
      * A new temporary encryption key is generated, which is
        used to generate the authenticating MAC.
 7. `p = decryptWithAD(temp_k2, 0, h, c)`
@@ -344,7 +345,7 @@ responder encrypted with _strong_ forward secrecy, using the accumulated `HKDF`
 derived secret key at this point of the handshake.
 
 The handshake is _exactly_ 66 bytes: 1 byte for the handshake version, 33
-bytes for the ephemeral public key encrypted with the `ChaCha20` stream
+bytes for the static public key encrypted with the `ChaCha20` stream
 cipher, 16 bytes for the encrypted public key's tag generated via the AEAD
 construction, and 16 bytes for a final authenticating tag.
 
@@ -353,9 +354,9 @@ construction, and 16 bytes for a final authenticating tag.
 1. `c = encryptWithAD(temp_k2, 1, h, s.pub.serializeCompressed())`
     * where `s` is the static public key of the initiator
 2. `h = SHA-256(h || c)`
-3. `ss = ECDH(re, s.priv)`
+3. `se = ECDH(s.priv, re)`
     * where `re` is the ephemeral public key of the responder
-4. `ck, temp_k3 = HKDF(ck, ss)`
+4. `ck, temp_k3 = HKDF(ck, se)`
     * The final intermediate shared secret is mixed into the running chaining key.
 5. `t = encryptWithAD(temp_k3, 0, h, zero)`
      * where `zero` is a zero-length plaintext
@@ -383,9 +384,9 @@ construction, and 16 bytes for a final authenticating tag.
      * At this point, the responder has recovered the static public key of the
        initiator.
 5. `h = SHA-256(h || c)`
-6. `ss = ECDH(rs, e.priv)`
+6. `se = ECDH(e.priv, rs)`
      * where `e` is the responder's original ephemeral key
-7. `ck, temp_k3 = HKDF(ck, ss)`
+7. `ck, temp_k3 = HKDF(ck, se)`
 8. `p = decryptWithAD(temp_k3, 0, h, t)`
      * If the MAC check in this operation fails, then the responder MUST
        terminate the connection without any further messages.

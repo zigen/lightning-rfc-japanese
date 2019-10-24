@@ -1,6 +1,6 @@
 # BOLT #11: Invoice Protocol for Lightning Payments
 
-A simple, extendable QR-code-ready protocol for requesting payments
+A simple, extendable, QR-code-ready protocol for requesting payments
 over Lightning.
 
 # Table of Contents
@@ -9,6 +9,7 @@ over Lightning.
   * [Human-Readable Part](#human-readable-part)
   * [Data Part](#data-part)
     * [Tagged Fields](#tagged-fields)
+    * [Feature Bits](#feature-bits)
   * [Payer / Payee Interactions](#payer--payee-interactions)
     * [Payer / Payee Requirements](#payer--payee-requirements)
   * [Implementation](#implementation)
@@ -26,24 +27,28 @@ of Lightning invoices.
 
 If a URI scheme is desired, the current recommendation is to either
 use 'lightning:' as a prefix before the BOLT-11 encoding (note: not
-'lightning://'), or for fallback to bitcoin payments to use 'bitcoin:',
+'lightning://'), or for fallback to Bitcoin payments, to use 'bitcoin:',
 as per BIP-21, with the key 'lightning' and the value equal to the BOLT-11
 encoding.
 
 ## Requirements
 
-A writer MUST encode the payment request in Bech32 as specified in
-BIP-0173, with the exception that the Bech32 string MAY be longer than
-the 90 characters specified there. A reader MUST parse the address as
-Bech32 as specified in BIP-0173 (also without the character limit),
-and MUST fail if the checksum is incorrect.
+A writer:
+   - MUST encode the payment request in Bech32 (see BIP-0173)
+   - MAY exceed the 90-character limit specified in BIP-0173.
+
+A reader:
+  - MUST parse the address as Bech32, as specified in BIP-0173 (also without the character limit).
+  - if the checksum is incorrect:
+    - MUST fail the payment.
 
 # Human-Readable Part
 
 The human-readable part of a Lightning invoice consists of two sections:
-1. `prefix`: `ln` + BIP-0173 currency prefix (e.g. `lnbc` for bitcoin mainnet, `lntb` for bitcoin testnet and `lnbcrt` for bitcoin regtest)
+1. `prefix`: `ln` + BIP-0173 currency prefix (e.g. `lnbc` for Bitcoin mainnet,
+   `lntb` for Bitcoin testnet, and `lnbcrt` for Bitcoin regtest)
 1. `amount`: optional number in that currency, followed by an optional
-   `multiplier` letter
+   `multiplier` letter. The unit encoded here is the 'social' convention of a payment unit -- in the case of Bitcoin the unit is 'bitcoin' NOT satoshis.
 
 The following `multiplier` letters are defined:
 
@@ -55,23 +60,25 @@ The following `multiplier` letters are defined:
 ## Requirements
 
 A writer:
-  - MUST encode `prefix` using the currency it requires for successful payment
-  - If it requires a specific minimum amount for successful payment:
-	- MUST include that `amount`
-	- MUST encode `amount` as a positive decimal integer with no leading zeroes
-	- SHOULD use the shortest representation possible by using the largest
-	  multiplier or omitting the multiplier
+  - MUST encode `prefix` using the currency required for successful payment.
+  - if a specific minimum `amount` is required for successful payment:
+	  - MUST include that `amount`.
+	- MUST encode `amount` as a positive decimal integer with no leading 0s.
+	- SHOULD use the shortest representation possible, by using the largest
+	  multiplier or omitting the multiplier.
 
 A reader:
-  - MUST fail if it does not understand the `prefix`
-  - If the `amount` is empty:
-	- SHOULD indicate if amount is unspecified
-  - Otherwise:
-	- MUST fail if `amount` contains a non-digit or is followed by
-      anything except a `multiplier` in the table above
-    - If the `multiplier` is present:
-	  - MUST multiply `amount` by the `multiplier` value to derive the
-        amount required for payment
+  - if it does NOT understand the `prefix`:
+    - MUST fail the payment.
+  - if the `amount` is empty:
+	  - SHOULD indicate to the payer that amount is unspecified.
+  - otherwise:
+    - if `amount` contains a non-digit OR is followed by anything except
+    a `multiplier` (see table above):
+  	  - MUST fail the payment.
+    - if the `multiplier` is present:
+	    - MUST multiply `amount` by the `multiplier` value to derive the
+      amount required for payment.
 
 ## Rationale
 
@@ -88,25 +95,25 @@ The data part of a Lightning invoice consists of multiple sections:
 
 1. `timestamp`: seconds-since-1970 (35 bits, big-endian)
 1. zero or more tagged parts
-1. `signature`: bitcoin-style signature of above (520 bits)
+1. `signature`: Bitcoin-style signature of above (520 bits)
 
 ## Requirements
 
-A writer MUST set `timestamp` to
-the number of seconds since Midnight 1 January 1970, UTC in
-big-endian. A writer MUST set `signature` to a valid
-512-bit secp256k1 signature of the SHA2 256-bit hash of the
-human-readable part, represented as UTF-8 bytes, concatenated with the
-data part (excluding the signature) with zero bits appended to pad the
-data to the next byte boundary, with a trailing byte containing
-the recovery ID (0, 1, 2 or 3).
+A writer:
+  - MUST set `timestamp` to the number of seconds since Midnight 1 January 1970, UTC in
+  big-endian.
+  - MUST set `signature` to a valid 512-bit secp256k1 signature of the SHA2 256-bit hash of the
+  human-readable part, represented as UTF-8 bytes, concatenated with the
+  data part (excluding the signature) with 0 bits appended to pad the
+  data to the next byte boundary, with a trailing byte containing
+  the recovery ID (0, 1, 2, or 3).
 
-A reader MUST check that the `signature` is valid (see the `n` tagged
-field specified below).
+A reader:
+  - MUST check that the `signature` is valid (see the `n` tagged field specified below).
 
 ## Rationale
 
-`signature` covers an exact number of bytes even though the SHA-2
+`signature` covers an exact number of bytes even though the SHA2
 standard actually supports hashing in bit boundaries, because it's not widely
 implemented. The recovery ID allows public-key recovery, so the
 identity of the payee node can be implied.
@@ -121,127 +128,139 @@ Each Tagged Field is of the form:
 
 Currently defined tagged fields are:
 
-* `p` (1): `data_length` 52. 256-bit SHA256 payment_hash. Preimage of this provides proof of payment
-* `d` (13): `data_length` variable. Short description of purpose of payment (UTF-8),  e.g. '1 cup of coffee' or 'ナンセンス 1杯'
+* `p` (1): `data_length` 52. 256-bit SHA256 payment_hash. Preimage of this provides proof of payment.
+* `d` (13): `data_length` variable. Short description of purpose of payment (UTF-8), e.g. '1 cup of coffee' or 'ナンセンス 1杯'
 * `n` (19): `data_length` 53. 33-byte public key of the payee node
 * `h` (23): `data_length` 52. 256-bit description of purpose of payment (SHA256). This is used to commit to an associated description that is over 639 bytes, but the transport mechanism for the description in that case is transport specific and not defined here.
 * `x` (6): `data_length` variable. `expiry` time in seconds (big-endian). Default is 3600 (1 hour) if not specified.
 * `c` (24): `data_length` variable. `min_final_cltv_expiry` to use for the last HTLC in the route. Default is 9 if not specified.
-* `f` (9): `data_length` variable, depending on version. Fallback on-chain address: for bitcoin, this starts with a 5-bit `version` and contains a witness program or P2PKH or P2SH address.
+* `f` (9): `data_length` variable, depending on version. Fallback on-chain address: for Bitcoin, this starts with a 5-bit `version` and contains a witness program or P2PKH or P2SH address.
 * `r` (3): `data_length` variable. One or more entries containing extra routing information for a private route; there may be more than one `r` field
    * `pubkey` (264 bits)
    * `short_channel_id` (64 bits)
    * `fee_base_msat` (32 bits, big-endian)
    * `fee_proportional_millionths` (32 bits, big-endian)
    * `cltv_expiry_delta` (16 bits, big-endian)
+* `9` (5): `data_length` variable. One or more 5-bit values containing features
+  supported or required for receiving this payment.
+  See [Feature Bits](#feature-bits).
 
 ### Requirements
 
-A writer MUST include exactly one `p` field, and set `payment_hash` to
-the SHA-2 256-bit hash of the `payment_preimage` that will be given
-in return for payment.
+A writer:
+  - MUST include exactly one `p` field.
+  - MUST set `payment_hash` to the SHA2 256-bit hash of the `payment_preimage`
+  that will be given in return for payment.
+  - MUST include either exactly one `d` or exactly one `h` field.
+    - if `d` is included:
+      - MUST set `d` to a valid UTF-8 string.
+      - SHOULD use a complete description of the purpose of the payment.
+    - if `h` is included:
+      - MUST make the preimage of the hashed description in `h` available
+      through some unspecified means.
+        - SHOULD use a complete description of the purpose of the payment.
+  - MAY include one `x` field.
+    - if `x` is included:
+      - SHOULD use the minimum `data_length` possible.
+  - MAY include one `c` field.
+    - MUST set `c` to the minimum `cltv_expiry` it will accept for the last
+    HTLC in the route.
+    - if `c` is included:
+      - SHOULD use the minimum `data_length` possible.
+  - MAY include one `n` field. (Otherwise performing signature recovery is required)
+    - MUST set `n` to the public key used to create the `signature`.
+  - MAY include one or more `f` fields.
+    - for Bitcoin payments:
+      - MUST set an `f` field to a valid witness version and program, OR to `17`
+      followed by a public key hash, OR to `18` followed by a script hash.
+  - if there is NOT a public channel associated with its public key:
+    - MUST include at least one `r` field.
+      - `r` field MUST contain one or more ordered entries, indicating the forward route from
+      a public node to the final destination.
+        - Note: for each entry, the `pubkey` is the node ID of the start of the channel;
+        `short_channel_id` is the short channel ID field to identify the channel; and
+        `fee_base_msat`, `fee_proportional_millionths`, and `cltv_expiry_delta` are as
+        specified in [BOLT #7](07-routing-gossip.md#the-channel_update-message).
+    - MAY include more than one `r` field to provide multiple routing options.
+  - if `9` contains non-zero bits:
+    - SHOULD use the minimum `data_length` possible.
+  - otherwise:
+    - MUST omit the `9` field altogether.
+  - MUST pad field data to a multiple of 5 bits, using 0s.
+  - if a writer offers more than one of any field type, it:
+    - MUST specify the most-preferred field first, followed by less-preferred fields, in order.
 
-A writer MUST include either exactly one `d` or exactly one `h` field. If included, a
-writer SHOULD make `d` a complete description of
-the purpose of the payment, and MUST use a valid UTF-8 string. If included, a writer MUST make the preimage
-of the hashed description in `h` available through some unspecified means,
-which SHOULD be a complete description of the purpose of the payment.
-
-A writer MAY include one `x` field.
-
-A writer MAY include one `c` field, which MUST be set to the minimum `cltv_expiry` it
-will accept for the last HTLC in the route.
-
-A writer SHOULD use the minimum `data_length` possible for `x` and `c` fields.
-
-A writer MAY include one `n` field, which MUST be set to the public key
-used to create the `signature`.
-
-A writer MAY include one or more `f` fields. For bitcoin payments, a writer MUST set an
-`f` field to a valid witness version and program, or `17` followed by
-a public key hash, or `18` followed by a script hash.
-
-A writer MUST include at least one `r` field if there is not a
-public channel associated with its public key. The `r` field MUST contain
-one or more ordered entries, indicating the forward route from a
-public node to the final destination. For each entry, the `pubkey` is the
-node ID of the start of the channel; `short_channel_id` is the short channel ID
-field to identify the channel; and `fee_base_msat`, `fee_proportional_millionths`, and `cltv_expiry_delta` are as specified in [BOLT #7](07-routing-gossip.md#the-channel_update-message). A writer MAY include more than one `r` field to
-provide multiple routing options.
-
-A writer MUST pad field data to a multiple of 5 bits, using zeroes.
-
-If a writer offers more than one of any field type, it MUST specify
-the most-preferred field first, followed by less-preferred fields in
-order.
-
-A reader MUST skip over unknown fields, an `f` field with unknown
-`version`, or a `p`, `h`, or `n` field that does not have `data_length` 52,
-52, or 53 respectively.
-
-A reader MUST check that the SHA-2 256 in the `h` field exactly
-matches the hashed description.
-
-A reader MUST use the `n` field to validate the signature instead of
-performing signature recovery if a valid `n` field is provided.
+A reader:
+  - MUST skip over unknown fields, OR an `f` field with unknown `version`, OR  `p`, `h`, or
+  `n` fields that do NOT have `data_length`s of 52, 52, or 53, respectively.
+  - if the `9` field contains unknown _odd_ bits that are non-zero:
+    - MUST ignore the bit.
+  - if the `9` field contains unknown _even_ bits that are non-zero:
+    - MUST fail the payment.
+	- SHOULD indicate the unknown bit to the user.
+  - MUST check that the SHA2 256-bit hash in the `h` field exactly matches the hashed
+  description.
+  - if a valid `n` field is provided:
+    - MUST use the `n` field to validate the signature instead of performing signature recovery.
 
 ### Rationale
 
 The type-and-length format allows future extensions to be backward
 compatible. `data_length` is always a multiple of 5 bits, for easy
-encoding and decoding. For fields that we expect may change, readers
-also ignore ones of different length.
+encoding and decoding. Readers also ignore fields of different length,
+for fields that are expected may change.
 
 The `p` field supports the current 256-bit payment hash, but future
-specs could add a new variant of different length, in which case
-writers could support both old and new, and old readers would ignore
-the one not the correct length.
+specs could add a new variant of different length: in which case,
+writers could support both old and new variants, and old readers would
+ignore the variant not the correct length.
 
 The `d` field allows inline descriptions, but may be insufficient for
-complex orders; thus the `h` field allows a summary, though the method
+complex orders. Thus, the `h` field allows a summary: though the method
 by which the description is served is as-yet unspecified and will
-probably be transport dependent. The `h` format could change in future
+probably be transport dependent. The `h` format could change in the future,
 by changing the length, so readers ignore it if it's not 256 bits.
 
 The `n` field can be used to explicitly specify the destination node ID,
 instead of requiring signature recovery.
 
 The `x` field gives warning as to when a payment will be
-refused; this is mainly to avoid confusion. The default was chosen
+refused: mainly to avoid confusion. The default was chosen
 to be reasonable for most payments and to allow sufficient time for
-on-chain payment if necessary.
+on-chain payment, if necessary.
 
-The `c` field gives a way for the destination node to require a specific
+The `c` field allows a way for the destination node to require a specific
 minimum CLTV expiry for its incoming HTLC. Destination nodes may use this
-to require a higher, more conservative value than the default one, depending
-on their fee estimation policy and their sensitivity to time locks. Note
+to require a higher, more conservative value than the default one (depending
+on their fee estimation policy and their sensitivity to time locks). Note
 that remote nodes in the route specify their required `cltv_expiry_delta`
 in the `channel_update` message, which they can update at all times.
 
-The `f` field allows on-chain fallback. This may not make sense for
-tiny or time-sensitive payments, however. It's possible that new
-address forms will appear, and so multiple `f` fields in an implied
-preferred order help with transition, and `f` fields with versions 19-31
+The `f` field allows on-chain fallback; however, this may not make sense for
+tiny or time-sensitive payments. It's possible that new
+address forms will appear; thus, multiple `f` fields (in an implied
+preferred order) help with transition, and `f` fields with versions 19-31
 will be ignored by readers.
 
-The `r` field allows limited routing assistance: as specified it only
-allows minimum information to use private channels, but it could also
+The `r` field allows limited routing assistance: as specified, it only
+allows minimum information to use private channels, however, it could also
 assist in future partial-knowledge routing.
 
 ### Security Considerations for Payment Descriptions
 
 Payment descriptions are user-defined and provide a potential avenue for
-injection attacks, both in the process of rendering and persistence.
+injection attacks: during the processes of both rendering and persistence.
 
 Payment descriptions should always be sanitized before being displayed in
-HTML/Javascript contexts, or any other dynamically interpreted rendering
-frameworks. Implementers should be extra perceptive to the possibility of
-reflected XSS attacks when decoding and displaying payment descriptions. Avoid
+HTML/Javascript contexts (or any other dynamically interpreted rendering
+frameworks). Implementers should be extra perceptive to the possibility of
+reflected XSS attacks, when decoding and displaying payment descriptions. Avoid
 optimistically rendering the contents of the payment request until all
-validation, verification, and sanitization have been successfully completed.
+validation, verification, and sanitization processes have been successfully
+completed.
 
 Furthermore, consider using prepared statements, input validation, and/or
-escaping to protect against injection vulnerabilities against persistence
+escaping, to protect against injection vulnerabilities in persistence
 engines that support SQL or other dynamically interpreted querying languages.
 
 * [Stored and Reflected XSS Prevention](https://www.owasp.org/index.php/XSS_(Cross_Site_Scripting)_Prevention_Cheat_Sheet)
@@ -250,17 +269,26 @@ engines that support SQL or other dynamically interpreted querying languages.
 
 Don't be like the school of [Little Bobby Tables](https://xkcd.com/327/).
 
+## Feature Bits
+
+Feature bits allow forward and backward compatibility, and follow the
+_it's ok to be odd_ rule.
+
+The field is big-endian.  The least-significant bit is numbered 0,
+which is _even_, and the next most significant bit is numbered 1,
+which is _odd_.
+
 # Payer / Payee Interactions
 
 These are generally defined by the rest of the Lightning BOLT series,
-but it's worth noting that [BOLT #5](05-onchain.md) specifies that the payee SHOULD
+but it's worth noting that [BOLT #4](04-onion-routing.md#requirements-2) specifies that the payee SHOULD
 accept up to twice the expected `amount`, so the payer can make
 payments harder to track by adding small variations.
 
-The intent is that the payer recover the payee's node ID from the
+The intent is that the payer recovers the payee's node ID from the
 signature, and after checking that conditions such as fees,
-expiry, and block timeout are acceptable, attempt a payment. It can use `r` fields to
-augment its routing information if necessary to reach the final node.
+expiry, and block timeout are acceptable, attempts a payment. It can use `r` fields to
+augment its routing information, if necessary to reach the final node.
 
 If the payment succeeds but there is a later dispute, the payer can
 prove both the signed offer from the payee and the successful
@@ -268,15 +296,20 @@ payment.
 
 ## Payer / Payee Requirements
 
-A payer SHOULD NOT attempt a payment after the `timestamp` plus
-`expiry` has passed. Otherwise, if a Lightning payment fails, a payer
-MAY attempt to use the address given in the first `f` field that it
-understands for payment. A payer MAY use the sequence of channels
-specified by the `r` field to route to the payee. A payer SHOULD consider the
-fee amount and payment timeout before initiating payment. A payer
-SHOULD use the first `p` field that it did not skip as the payment hash.
+A payer:
+  - after the `timestamp` plus `expiry` has passed:
+    - SHOULD NOT attempt a payment.
+  - otherwise:
+    - if a Lightning payment fails:
+      - MAY attempt to use the address given in the first `f` field that it
+      understands for payment.
+  - MAY use the sequence of channels, specified by the `r` field, to route to the payee.
+  - SHOULD consider the fee amount and payment timeout before initiating payment.
+  - SHOULD use the first `p` field that it did NOT skip as the payment hash.
 
-A payee SHOULD NOT accept a payment after `timestamp` plus `expiry`.
+A payee:
+  - after the `timestamp` plus `expiry` has passed:
+    - SHOULD NOT accept a payment.
 
 # Implementation
 
@@ -291,7 +324,7 @@ NB: all the following examples are signed with `priv_key`=`e126f68f7eafcc8b74f54
 
 Breakdown:
 
-* `lnbc`: prefix, lightning on bitcoin mainnet
+* `lnbc`: prefix, Lightning on Bitcoin mainnet
 * `1`: Bech32 separator
 * `pvjluez`: timestamp (1496314658)
 * `p`: payment hash
@@ -308,12 +341,12 @@ Breakdown:
   * `6c6e62630b25fe64410d00004080c1014181c20240004080c1014181c20240004080c1014181c202404081a1fa83632b0b9b29031b7b739b4b232b91039bab83837b93a34b733903a3434b990383937b532b1ba0` hex of data for signing (prefix + data after separator up to the start of the signature)
   * `c3d4e83f646fa79a393d75277b1d858db1d1f7ab7137dcb7835db2ecd518e1c9` hex of SHA256 of the preimage
 
-> ### Please send $3 for a cup of coffee to the same peer, within 1 minute
+> ### Please send $3 for a cup of coffee to the same peer, within one minute
 > lnbc2500u1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdq5xysxxatsyp3k7enxv4jsxqzpuaztrnwngzn3kdzw5hydlzf03qdgm2hdq27cqv3agm2awhz5se903vruatfhq77w3ls4evs3ch9zw97j25emudupq63nyw24cg27h2rspfj9srp
 
 Breakdown:
 
-* `lnbc`: prefix, lightning on bitcoin mainnet
+* `lnbc`: prefix, Lightning on Bitcoin mainnet
 * `2500u`: amount (2500 micro-bitcoin)
 * `1`: Bech32 separator
 * `pvjluez`: timestamp (1496314658)
@@ -332,12 +365,12 @@ Breakdown:
   * `6c6e626332353030750b25fe64410d00004080c1014181c20240004080c1014181c20240004080c1014181c202404081a0a189031bab81031b7b33332b2818020f00` hex of data for signing (prefix + data after separator up to the start of the signature)
   * `3cd6ef07744040556e01be64f68fd9e1565fb47d78c42308b1ee005aca5a0d86` hex of SHA256 of the preimage
 
-> ### Please send 0.0025 BTC for a cup of nonsense (ナンセンス 1杯) to the same peer, within 1 minute
+> ### Please send 0.0025 BTC for a cup of nonsense (ナンセンス 1杯) to the same peer, within one minute
 > lnbc2500u1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdpquwpc4curk03c9wlrswe78q4eyqc7d8d0xqzpuyk0sg5g70me25alkluzd2x62aysf2pyy8edtjeevuv4p2d5p76r4zkmneet7uvyakky2zr4cusd45tftc9c5fh0nnqpnl2jfll544esqchsrny
 
 Breakdown:
 
-* `lnbc`: prefix, lightning on bitcoin mainnet
+* `lnbc`: prefix, Lightning on Bitcoin mainnet
 * `2500u`: amount (2500 micro-bitcoin)
 * `1`: Bech32 separator
 * `pvjluez`: timestamp (1496314658)
@@ -361,7 +394,7 @@ Breakdown:
 
 Breakdown:
 
-* `lnbc`: prefix, lightning on bitcoin mainnet
+* `lnbc`: prefix, Lightning on Bitcoin mainnet
 * `20m`: amount (20 milli-bitcoin)
 * `1`: Bech32 separator
 * `pvjluez`: timestamp (1496314658)
@@ -382,7 +415,7 @@ Breakdown:
 
 Breakdown:
 
-* `lntb`: prefix, lightning on bitcoin testnet
+* `lntb`: prefix, Lightning on Bitcoin testnet
 * `20m`: amount (20 milli-bitcoin)
 * `1`: Bech32 separator
 * `pvjluez`: timestamp (1496314658)
@@ -391,7 +424,7 @@ Breakdown:
 * `f`: tagged field: fallback address
   * `pp`: `data_length` (`p` = 1; 1 * 32 + 1 == 33)
   * `3` = 17, so P2PKH address
-  * `x9et2e20v6pu37c5d9vax37wxq72un98`: 160 bit P2PKH address
+  * `x9et2e20v6pu37c5d9vax37wxq72un98`: 160-bit P2PKH address
 * `kmzzhznpurw9sgl2v0nklu2g4d0keph5t7tj9tcqd8rexnd07ux4uv2cjvcqwaxgj7v4uwn5wmypjd5n69z2xm3xgksg28nwht7f6zsp`: signature
 * `wp3f9t`: Bech32 checksum
 * Signature breakdown:
@@ -405,7 +438,7 @@ Breakdown:
 
 Breakdown:
 
-* `lnbc`: prefix, lightning on bitcoin mainnet
+* `lnbc`: prefix, Lightning on Bitcoin mainnet
 * `20m`: amount (20 milli-bitcoin)
 * `1`: Bech32 separator
 * `pvjluez`: timestamp (1496314658)
@@ -414,10 +447,10 @@ Breakdown:
 * `f`: tagged field: fallback address
   * `pp`: `data_length` (`p` = 1; 1 * 32 + 1 == 33)
   * `3` = 17, so P2PKH address
-  * `qjmp7lwpagxun9pygexvgpjdc4jdj85f`: 160 bit P2PKH address
+  * `qjmp7lwpagxun9pygexvgpjdc4jdj85f`: 160-bit P2PKH address
 * `r`: tagged field: route information
-  * `9y`: `data_length` (`9` = 5, `y` = 4; 5 * 32 + 4 = 164)
-    * `q20q82gphp2nflc7jtzrcazrra7wwgzxqc8u7754cdlpfrmccae92qgzqvzq2ps8pqqqqqqpqqqqq9qqqvpeuqafqxu92d8lr6fvg0r5gv0heeeqgcrqlnm6jhphu9y00rrhy4grqszsvpcgpy9qqqqqqgqqqqq7qqzq`: 
+  * `9y`: `data_length` (`9` = 5, `y` = 4; 5 * 32 + 4 == 164)
+    * `q20q82gphp2nflc7jtzrcazrra7wwgzxqc8u7754cdlpfrmccae92qgzqvzq2ps8pqqqqqqpqqqqq9qqqvpeuqafqxu92d8lr6fvg0r5gv0heeeqgcrqlnm6jhphu9y00rrhy4grqszsvpcgpy9qqqqqqgqqqqq7qqzq`:
       * pubkey: `029e03a901b85534ff1e92c43c74431f7ce72046060fcf7a95c37e148f78c77255`
       * `short_channel_id`: 0102030405060708
       * `fee_base_msat`: 1 millisatoshi
@@ -441,7 +474,7 @@ Breakdown:
 
 Breakdown:
 
-* `lnbc`: prefix, lightning on bitcoin mainnet
+* `lnbc`: prefix, Lightning on Bitcoin mainnet
 * `20m`: amount (20 milli-bitcoin)
 * `1`: Bech32 separator
 * `pvjluez`: timestamp (1496314658)
@@ -450,7 +483,7 @@ Breakdown:
 * `f`: tagged field: fallback address
   * `pp`: `data_length` (`p` = 1; 1 * 32 + 1 == 33)
   * `j` = 18, so P2SH address
-  * `3a24vwu6r8ejrss3axul8rxldph2q7z9`:  160 bit P2SH address
+  * `3a24vwu6r8ejrss3axul8rxldph2q7z9`:  160-bit P2SH address
 * `kmrgvr7xlaqm47apw3d48zm203kzcq357a4ls9al2ea73r8jcceyjtya6fu5wzzpe50zrge6ulk4nvjcpxlekvmxl6qcs9j3tz0469gq`: signature
 * `5g658y`: Bech32 checksum
 * Signature breakdown:
@@ -462,7 +495,7 @@ Breakdown:
 > ### On mainnet, with fallback (P2WPKH) address bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4
 > lnbc20m1pvjluezhp58yjmdan79s6qqdhdzgynm4zwqd5d7xmw5fk98klysy043l2ahrqspp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqfppqw508d6qejxtdg4y5r3zarvary0c5xw7kepvrhrm9s57hejg0p662ur5j5cr03890fa7k2pypgttmh4897d3raaq85a293e9jpuqwl0rnfuwzam7yr8e690nd2ypcq9hlkdwdvycqa0qza8
 
-* `lnbc`: prefix, lightning on bitcoin mainnet
+* `lnbc`: prefix, Lightning on Bitcoin mainnet
 * `20m`: amount (20 milli-bitcoin)
 * `1`: Bech32 separator
 * `pvjluez`: timestamp (1496314658)
@@ -483,7 +516,7 @@ Breakdown:
 > ### On mainnet, with fallback (P2WSH) address bc1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3qccfmv3
 > lnbc20m1pvjluezhp58yjmdan79s6qqdhdzgynm4zwqd5d7xmw5fk98klysy043l2ahrqspp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqfp4qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q28j0v3rwgy9pvjnd48ee2pl8xrpxysd5g44td63g6xcjcu003j3qe8878hluqlvl3km8rm92f5stamd3jw763n3hck0ct7p8wwj463cql26ava
 
-* `lnbc`: prefix, lightning on bitcoin mainnet
+* `lnbc`: prefix, Lightning on Bitcoin mainnet
 * `20m`: amount (20 milli-bitcoin)
 * `1`: Bech32 separator
 * `pvjluez`: timestamp (1496314658)
@@ -500,6 +533,44 @@ Breakdown:
   * `0` (int) recovery flag contained in `signature`
   * `6c6e626332306d0b25fe64570d0e496dbd9f8b0d000dbb44824f751380da37c6dba89b14f6f92047d63f576e304021a00008101820283038404800081018202830384048000810182028303840480810243500c318a1e0a628b34025e8c9019ab6d09b64c2b3c66a693d0dc63194b02481931000` hex of data for signing (prefix + data after separator up to the start of the signature)
   * `399a8b167029fda8564fd2e99912236b0b8017e7d17e416ae17307812c92cf42` hex of SHA256 of the preimage
+
+> ### Please send $30 for coffee beans to the same peer, which supports features 1 and 9
+> lnbc25m1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdq5vdhkven9v5sxyetpdees9qzsze992adudgku8p05pstl6zh7av6rx2f297pv89gu5q93a0hf3g7lynl3xq56t23dpvah6u7y9qey9lccrdml3gaqwc6nxsl5ktzm464sq73t7cl
+
+Breakdown:
+
+* `lnbc`: prefix, Lightning on Bitcoin mainnet
+* `25m`: amount (25 milli-bitcoin)
+* `1`: Bech32 separator
+* `pvjluez`: timestamp (1496314658)
+* `p`: payment hash...
+* `d`: short description
+  * `q5`: `data_length` (`q` = 0, `5` = 20; 0 * 32 + 20 == 20)
+  * `vdhkven9v5sxyetpdees`: 'coffee beans'
+* `9`: features
+  * `qz`: `data_length` (`q` = 0, `z` = 2; 0 * 32 + 2 == 2)
+  * `sz`: b1000000010
+* `e992adudgku8p05pstl6zh7av6rx2f297pv89gu5q93a0hf3g7lynl3xq56t23dpvah6u7y9qey9lccrdml3gaqwc6nxsl5ktzm464sq`: signature
+* `73t7cl`: Bech32 checksum
+
+> # Same, but using invalid unknown feature 100
+> lnbc25m1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdq5vdhkven9v5sxyetpdees9q4pqqqqqqqqqqqqqqqqqqszk3ed62snp73037h4py4gry05eltlp0uezm2w9ajnerhmxzhzhsu40g9mgyx5v3ad4aqwkmvyftzk4k9zenz90mhjcy9hcevc7r3lx2sphzfxz7
+
+Breakdown:
+
+* `lnbc`: prefix, Lightning on Bitcoin mainnet
+* `25m`: amount (25 milli-bitcoin)
+* `1`: Bech32 separator
+* `pvjluez`: timestamp (1496314658)
+* `p`: payment hash...
+* `d`: short description
+  * `q5`: `data_length` (`q` = 0, `5` = 20; 0 * 32 + 20 == 20)
+  * `vdhkven9v5sxyetpdees`: 'coffee beans'
+* `9`: features
+  * `q4`: `data_length` (`q` = 0, `4` = 21; 0 * 32 + 21 == 21)
+  * `pqqqqqqqqqqqqqqqqqqsz`: b00001...(90 zeroes)...1000000010
+* `k3ed62snp73037h4py4gry05eltlp0uezm2w9ajnerhmxzhzhsu40g9mgyx5v3ad4aqwkmvyftzk4k9zenz90mhjcy9hcevc7r3lx2sp`: signature
+* `hzfxz7`: Bech32 checksum
 
 # Authors
 
