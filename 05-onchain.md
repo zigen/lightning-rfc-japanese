@@ -160,7 +160,7 @@ it to be processed.
 
 # Mutual Close Handling
 
-A mutual close transaction *resolves* the funding transaction output.
+A closing transaction *resolves* the funding transaction output.
 
 In the case of a mutual close, a node need not do anything else, as it has
 already agreed to the output, which is sent to its specified `scriptpubkey` (see
@@ -207,15 +207,15 @@ can be ignored.
 
 ## HTLC Output Handling: Local Commitment, Local Offers
 
-Each HTLC output can only be spent by either a local offerer, by using the HTLC-timeout
-transaction after it's timed out, or a remote recipient, if it has the payment
-preimage.
+Each HTLC output can only be spent by either the *local offerer*, by using the
+HTLC-timeout transaction after it's timed out, or the *remote recipient*, if it
+has the payment preimage.
 
-There can be HTLCs which are not represented by an output: either
+There can be HTLCs which are not represented by any outputs: either
 because they were trimmed as dust, or because the transaction has only been
 partially committed.
 
-The HTLC has *timed out* once the depth of the latest block is equal to
+The HTLC output has *timed out* once the depth of the latest block is equal to
 or greater than the HTLC `cltv_expiry`.
 
 ### Requirements
@@ -235,7 +235,7 @@ A node:
       convenient address.
         - Note: if the output is spent (as recommended), the output is
         *resolved* by the spending transaction, otherwise it is considered
-        *resolved* by the commitment transaction itself.
+        *resolved* by the HTLC-timeout transaction itself.
       - MUST wait until the `OP_CHECKSEQUENCEVERIFY` delay has passed (as
       specified by the remote node's `open_channel` `to_self_delay` field)
       before spending that HTLC-timeout output.
@@ -315,7 +315,7 @@ A local node:
     spending that HTLC-success transaction output.
 
 If the output is spent (as is recommended), the output is *resolved* by
-the spending transaction, otherwise it's considered *resolved* by the commitment
+the spending transaction, otherwise it's considered *resolved* by the HTLC-success
 transaction itself.
 
 If it's NOT otherwise resolved, once the HTLC output has expired, it is
@@ -370,15 +370,16 @@ will be unable to salvage the HTLCs.
 
 ## HTLC Output Handling: Remote Commitment, Local Offers
 
-Each HTLC output can only be spent by the *offerer*, after it's timed out, or by
-the *recipient*, if it has the payment preimage.
+Each HTLC output can only be spent by either the *local offerer*, after it's
+timed out, or by the *remote recipient*, by using the HTLC-success transaction
+if it has the payment preimage.
+
+There can be HTLCs which are not represented by any outputs: either
+because the outputs were trimmed as dust, or because the remote node has two
+*valid* commitment transactions with differing HTLCs.
 
 The HTLC output has *timed out* once the depth of the latest block is equal to
 or greater than the HTLC `cltv_expiry`.
-
-There can be HTLCs which are not represented by any outputs: either
-because the outputs were trimmed as dust or because the remote node has two
-*valid* commitment transactions with differing HTLCs.
 
 ### Requirements
 
@@ -434,11 +435,6 @@ own timeout still applies as an upper bound.
 
 ## HTLC Output Handling: Remote Commitment, Remote Offers
 
-Each HTLC output can only be spent by the recipient if it uses the payment
-preimage. If a node does not possess the preimage (and doesn't discover
-it), it's the offerer's responsibility to spend the HTLC output once it's timed
-out.
-
 The remote HTLC outputs can only be spent by the local node if it has the
 payment preimage. If the local node does not have the preimage (and doesn't
 discover it), it's the remote node's responsibility to spend the HTLC output
@@ -493,13 +489,14 @@ A local node:
       itself.
   - MUST *resolve* the _remote node's main output_ by spending it using the
   revocation private key.
-  - MUST *resolve* the _local node's offered HTLCs_ in one of three ways:
+  - MUST *resolve* the _remote node's offered HTLCs_ in one of three ways:
     * spend the *commitment tx* using the payment revocation private key.
     * spend the *commitment tx* using the payment preimage (if known).
     * spend the *HTLC-timeout tx*, if the remote node has published it.
-  - MUST *resolve* the _remote node's offered HTLCs_ in one of two ways:
-    * spend the *commitment tx* using the payment revocation key.
+  - MUST *resolve* the _local node's offered HTLCs_ in one of three ways:
+    * spend the *commitment tx* using the payment revocation private key.
     * spend the *commitment tx* once the HTLC timeout has passed.
+    * spend the *HTLC-success tx*, if the remote node has published it.
   - MUST *resolve* the _remote node's HTLC-timeout transaction_ by spending it
   using the revocation private key.
   - MUST *resolve* the _remote node's HTLC-success transaction_ by spending it

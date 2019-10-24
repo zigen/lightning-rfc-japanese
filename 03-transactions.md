@@ -42,7 +42,15 @@ This details the exact format of on-chain transactions, which both sides need to
 
 ## Transaction Input and Output Ordering
 
-Lexicographic ordering: see [BIP69](https://github.com/bitcoin/bips/blob/master/bip-0069.mediawiki).
+Lexicographic ordering: see [BIP69](https://github.com/bitcoin/bips/blob/master/bip-0069.mediawiki).  In the case of identical HTLC outputs, the outputs are ordered in increasing `cltv_expiry` order.
+
+## Rationale
+
+Two offered HTLCs which have the same `amount_msat` and `payment_hash`
+will have identical outputs, even if their `cltv_expiry` differs.
+This only matters because the same ordering is used to send
+`htlc_signatures` and the HTLC transactions themselves are different,
+thus the two peers must agree on the canonical ordering for this case.
 
 ## Use of Segwit
 
@@ -59,14 +67,14 @@ Most transaction outputs used here are pay-to-witness-script-hash<sup>[BIP141](h
 ## Commitment Transaction
 
 * version: 2
-* locktime: upper 8 bits are 0x20, lower 24 bits are the lower 24 bits of the obscured commitment transaction number
+* locktime: upper 8 bits are 0x20, lower 24 bits are the lower 24 bits of the obscured commitment number
 * txin count: 1
    * `txin[0]` outpoint: `txid` and `output_index` from `funding_created` message
-   * `txin[0]` sequence: upper 8 bits are 0x80, lower 24 bits are upper 24 bits of the obscured commitment transaction number
+   * `txin[0]` sequence: upper 8 bits are 0x80, lower 24 bits are upper 24 bits of the obscured commitment number
    * `txin[0]` script bytes: 0
    * `txin[0]` witness: `0 <signature_for_pubkey1> <signature_for_pubkey2>`
 
-The 48-bit commitment transaction number is obscured by `XOR` with the lower 48 bits of:
+The 48-bit commitment number is obscured by `XOR` with the lower 48 bits of:
 
     SHA256(payment_basepoint from open_channel || payment_basepoint from accept_channel)
 
@@ -86,14 +94,14 @@ The amounts for each output MUST be rounded down to whole satoshis. If this amou
 
 #### `to_local` Output
 
-This output sends funds back to the owner of this commitment transaction and thus must be timelocked using `OP_CSV`. It can be claimed, without delay, by the other party if they know the revocation private key. The output is a version-0 P2WSH, with a witness script:
+This output sends funds back to the owner of this commitment transaction and thus must be timelocked using `OP_CHECKSEQUENCEVERIFY`. It can be claimed, without delay, by the other party if they know the revocation private key. The output is a version-0 P2WSH, with a witness script:
 
     OP_IF
         # Penalty transaction
         <revocationpubkey>
     OP_ELSE
         `to_self_delay`
-        OP_CSV
+        OP_CHECKSEQUENCEVERIFY
         OP_DROP
         <local_delayedpubkey>
     OP_ENDIF
@@ -139,7 +147,7 @@ If a revoked commitment transaction is published, the remote node can spend this
 
     <revocation_sig> <revocationpubkey>
 
-The sending node can use the HTLC-timeout transaction to timeout the HTLC once the HTLC is expired, as shown below.
+The sending node can use the HTLC-timeout transaction to timeout the HTLC once the HTLC is expired, as shown below. This is the only way that the local node can timeout the HTLC, and this branch requires `<remotehtlcsig>`, which ensures that the local node cannot prematurely timeout the HTLC since the HTLC-timeout transaction has `cltv_expiry` as its specified `locktime`. The local node must also wait `to_self_delay` before accessing these funds, allowing for the remote node to claim these funds if the transaction has been revoked.
 
 #### Received HTLC Outputs
 
@@ -150,8 +158,7 @@ This output sends funds to either the remote node after the HTLC-timeout or usin
     OP_IF
         OP_CHECKSIG
     OP_ELSE
-        <remote_htlcpubkey> OP_SWAP
-            OP_SIZE 32 OP_EQUAL
+        <remote_htlcpubkey> OP_SWAP OP_SIZE 32 OP_EQUAL
         OP_IF
             # To local node via HTLC-success transaction.
             OP_HASH160 <RIPEMD160(payment_hash)> OP_EQUALVERIFY
@@ -171,7 +178,7 @@ If a revoked commitment transaction is published, the remote node can spend this
 
     <revocation_sig> <revocationpubkey>
 
-To redeem the HTLC, the HTLC-success transaction is used as detailed below.
+To redeem the HTLC, the HTLC-success transaction is used as detailed below. This is the only way that the local node can spend the HTLC, since this branch requires `<remotehtlcsig>`, which ensures that the local node must wait `to_self_delay` before accessing these funds allowing for the remote node to claim these funds if the transaction has been revoked.
 
 ### Trimmed Outputs
 
@@ -217,7 +224,7 @@ less than `dust_limit_satoshis` set by the transaction owner:
 
 ## HTLC-Timeout and HTLC-Success Transactions
 
-These HTLC transactions are almost identical, except the HTLC-timeout transaction is timelocked. The HTLC-timeout transaction is also the transaction that can be spent by a valid penalty transaction.
+These HTLC transactions are almost identical, except the HTLC-timeout transaction is timelocked. Both HTLC-timeout/HTLC-success transactions can be spent by a valid penalty transaction.
 
 * version: 2
 * locktime: `0` for HTLC-success, `cltv_expiry` for HTLC-timeout
@@ -237,7 +244,7 @@ The witness script for the output is:
         <revocationpubkey>
     OP_ELSE
         `to_self_delay`
-        OP_CSV
+        OP_CHECKSEQUENCEVERIFY
         OP_DROP
         <local_delayedpubkey>
     OP_ENDIF
@@ -283,8 +290,8 @@ reason for the other side to fail the closing protocol; so this is
 explicitly allowed. The signature indicates which variant
 has been used.
 
-There will be at least one output, if `dust_limit_satoshis` is greater
-than twice the funding amount.
+There will be at least one output, if the funding amount is greater
+than twice `dust_limit_satoshis`.
 
 ## Fees
 
@@ -398,15 +405,15 @@ committed HTLCs:
    add a [`to_local` output](#to_local-output).
 6. If the `to_remote` amount is greater or equal to `dust_limit_satoshis`,
    add a [`to_remote` output](#to_remote-output).
-7. Sort the outputs into [BIP 69 order](#transaction-input-and-output-ordering).
+7. Sort the outputs into [BIP 69+CLTV order](#transaction-input-and-output-ordering).
 
 # Keys
 
 ## Key Derivation
 
-Each commitment transaction uses a unique set of keys: `localpubkey` and `remotepubkey`.
+Each commitment transaction uses a unique `localpubkey`, and a `remotepubkey`.
 The HTLC-success and HTLC-timeout transactions use `local_delayedpubkey` and `revocationpubkey`.
-These are changed for every transaction based on the `per_commitment_point`.
+These are changed for every transaction based on the `per_commitment_point`, with the exception of `remotepubkey` if `option_static_remotekey` is negotiated.
 
 The reason for key change is so that trustless watching for revoked
 transactions can be outsourced. Such a _watcher_ should not be able to
@@ -419,8 +426,9 @@ avoid storage of every commitment transaction, a _watcher_ can be given the
 the scripts required for the penalty transaction; thus, a _watcher_ need only be
 given (and store) the signatures for each penalty input.
 
-Changing the `localpubkey` and `remotepubkey` every time ensures that commitment
-transaction ID cannot be guessed; every commitment transaction uses an ID
+Changing the `localpubkey` every time ensures that commitment
+transaction ID cannot be guessed except in the trivial case where there is no
+`to_local` output, as every commitment transaction uses an ID
 in its output script. Splitting the `local_delayedpubkey`, which is required for
 the penalty transaction, allows it to be shared with the _watcher_ without
 revealing `localpubkey`; even if both peers use the same _watcher_, nothing is revealed.
@@ -434,22 +442,35 @@ For efficiency, keys are generated from a series of per-commitment secrets
 that are generated from a single seed, which allows the receiver to compactly
 store them (see [below](#efficient-per-commitment-secret-storage)).
 
-### `localpubkey`, `remotepubkey`, `local_htlcpubkey`, `remote_htlcpubkey`, `local_delayedpubkey`, and `remote_delayedpubkey` Derivation
+### `localpubkey`, `local_htlcpubkey`, `remote_htlcpubkey`, `local_delayedpubkey`, and `remote_delayedpubkey` Derivation
 
 These pubkeys are simply generated by addition from their base points:
 
 	pubkey = basepoint + SHA256(per_commitment_point || basepoint) * G
 
-The `localpubkey` uses the local node's `payment_basepoint`; the `remotepubkey`
-uses the remote node's `payment_basepoint`; the `local_delayedpubkey`
-uses the local node's `delayed_payment_basepoint`; the `local_htlcpubkey` uses the
-local node's `htlc_basepoint`; and the `remote_delayedpubkey` uses the remote
-node's `delayed_payment_basepoint`.
+The `localpubkey` uses the local node's `payment_basepoint`;
+the `local_htlcpubkey` uses the local node's `htlc_basepoint`;
+the `remote_htlcpubkey` uses the remote node's `htlc_basepoint`;
+the `local_delayedpubkey` uses the local node's `delayed_payment_basepoint`;
+and the `remote_delayedpubkey` uses the remote node's `delayed_payment_basepoint`.
 
 The corresponding private keys can be similarly derived, if the basepoint
 secrets are known (i.e. the private keys corresponding to `localpubkey`, `local_htlcpubkey`, and `local_delayedpubkey` only):
 
     privkey = basepoint_secret + SHA256(per_commitment_point || basepoint)
+
+### `remotepubkey` Derivation
+
+If `option_static_remotekey` is negotiated the `remotepubkey` is simply the
+remote node's `payment_basepoint`, otherwise it is calculated as above using
+the remote node's `payment_basepoint`.
+
+The simplified derivation means that a node can spend a commitment
+transaction even if it has lost data and doesn't know the
+corresponding `per_commitment_point`.  A watchtower could correlate
+transactions given to it which only have a `to_remote` output if it
+sees one of them onchain, but such transactions do not need any
+enforcement and should not be handed to a watchtower.
 
 ### `revocationpubkey` Derivation
 
@@ -544,40 +565,40 @@ secret is stored:
 
     # a.k.a. count trailing 0s
     where_to_put_secret(I):
-		for B in 0 to 47:
-			if testbit(I) in B == 1:
-				return B
+        for B in 0 to 47:
+            if testbit(I) in B == 1:
+                return B
         # I = 0, this is the seed.
-		return 48
+        return 48
 
 A double-check, that all previous secrets derive correctly, is needed;
 if this check fails, the secrets were not generated from the same seed:
 
     insert_secret(secret, I):
-		B = where_to_put_secret(secret, I)
+        B = where_to_put_secret(secret, I)
 
         # This tracks the index of the secret in each bucket across the traversal.
-		for b in 0 to B:
-			if derive_secret(secret, B, known[b].index) != known[b].secret:
-				error The secret for I is incorrect
-				return
+        for b in 0 to B:
+            if derive_secret(secret, B, known[b].index) != known[b].secret:
+                error The secret for I is incorrect
+                return
 
         # Assuming this automatically extends known[] as required.
-		known[B].index = I
-		known[B].secret = secret
+        known[B].index = I
+        known[B].secret = secret
 
 Finally, if an unknown secret at index `I` needs be derived, it must be
 discovered which known secret can be used to derive it. The simplest
 method is iterating over all the known secrets, and testing if each
 can be used to derive the unknown secret:
 
-	derive_old_secret(I):
-		for b in 0 to len(secrets):
-		    # Mask off the non-zero prefix of the index.
-		    MASK = ~((1 << b) - 1)
-			if (I & MASK) == secrets[b].index:
-				return derive_secret(known, i, I)
-	    error Index 'I' hasn't been received yet.
+    derive_old_secret(I):
+        for b in 0 to len(secrets):
+            # Mask off the non-zero prefix of the index.
+            MASK = ~((1 << b) - 1)
+            if (I & MASK) == secrets[b].index:
+                return derive_secret(known, i, I)
+        error Index 'I' hasn't been received yet.
 
 This looks complicated, but remember that the index in entry `b` has
 `b` trailing 0s; the mask and compare simply checks if the index
@@ -690,7 +711,8 @@ The *expected weight* of an HTLC transaction is calculated as follows:
         - remotepubkey: 33 bytes
         - OP_SWAP: 1 byte
         - OP_SIZE: 1 byte
-        - 32: 2 bytes
+        - OP_DATA: 1 byte (32 length)
+        - 32: 1 byte
         - OP_EQUAL: 1 byte
         - OP_IF: 1 byte
         - OP_HASH160: 1 byte
@@ -806,7 +828,7 @@ HTLC-success) results in weights of:
 In the following:
  - It's assumed that *local* is the funder.
  - Private keys are displayed as 32 bytes plus a trailing 1 (Bitcoin's convention for "compressed" private keys, i.e. keys for which the public key is compressed).
- - Transaction signatures are all deterministic, using RFC6979 (using HMAC-SHA256).
+ - Transaction signatures are all deterministic, using RFC6979 (using HMAC-SHA256). A valid signature MUST sign all inputs and outputs of the relevant transaction (i.e. MUST be created with a `SIGHASH_ALL` [signature hash](https://bitcoin.org/en/glossary/signature-hash)), unless explicitly stated otherwise. Note that clients MUST send the signature in compact encoding and not in Bitcoin-script format, thus the signature hash byte is not transmitted.
 
 The input for the funding transaction was created using a test chain
 with the following first two blocks; the second block contains a spendable
@@ -884,7 +906,7 @@ HTLCs are not used for the first "simple commitment tx with no HTLCs" test.
      required for this test. They're included here for completeness and
 	 in case someone wants to reproduce the test vectors themselves:
 
-INTERNAL: remote_funding_privkey: 1552dfba4f6cf29a62a0af13c8d6981d36d0ef8d61ba10fb0fe90da7634d7e130101
+INTERNAL: remote_funding_privkey: 1552dfba4f6cf29a62a0af13c8d6981d36d0ef8d61ba10fb0fe90da7634d7e1301
 INTERNAL: local_payment_basepoint_secret: 111111111111111111111111111111111111111111111111111111111111111101
 INTERNAL: remote_revocation_basepoint_secret: 222222222222222222222222222222222222222222222222222222222222222201
 INTERNAL: local_delayed_payment_basepoint_secret: 333333333333333333333333333333333333333333333333333333333333333301
@@ -904,7 +926,7 @@ Here are the points used to derive the obscuring factor for the commitment numbe
 
     local_payment_basepoint: 034f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa
     remote_payment_basepoint: 032c0b7cf95324a07d05398b240174dc0c2be444d96b159aa6c7f7b1e668680991
-    # obscured commitment transaction number = 0x2bb038521914 ^ 42
+    # obscured commitment number = 0x2bb038521914 ^ 42
 
 And, here are the keys needed to create the transactions:
 
